@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Download, Upload, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, X, BookOpen, Save, Mic, MicOff } from 'lucide-react';
+import { Download, Upload, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, X, BookOpen, Save, Mic, MicOff, AlertCircle, ShieldAlert } from 'lucide-react';
 import { Transaction, Diary, TransactionType } from '../types';
 import { CATEGORY_GROUPS, INCOME_CATEGORY } from '../constants';
 
@@ -32,59 +32,19 @@ const getLocalDateString = (date: Date) => {
 
 const normalizeVoiceText = (text: string) => {
   let t = text;
-  
-  // 预处理：统一“两”为“二”以便后续正则匹配
   t = t.replace(/两/g, '二');
-
-  const map: Record<string, number> = {
-    '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, 
-    '五': 5, '六': 6, '七': 7, '八': 8, '九': 9
-  };
+  const map: Record<string, number> = { '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
   const d = (char: string) => map[char];
-
-  // --- 处理“千” (Thousands) ---
-  // 简单的 X千 处理 (如：一千 -> 1000)
   t = t.replace(/([一二三四五六七八九])千/g, (_, p1) => String(d(p1) * 1000));
-
-  // --- 处理“百” (Hundreds) ---
-  // 1. X百X十X (如：一百二十三 -> 123)
-  t = t.replace(/([一二三四五六七八九])百([一二三四五六七八九])十([一二三四五六七八九])/g, 
-    (_, p1, p2, p3) => String(d(p1)*100 + d(p2)*10 + d(p3)));
-  
-  // 2. X百X十 (如：一百二十 -> 120)
-  t = t.replace(/([一二三四五六七八九])百([一二三四五六七八九])十/g, 
-    (_, p1, p2) => String(d(p1)*100 + d(p2)*10));
-
-  // 3. X百零X (如：一百零五 -> 105)
-  t = t.replace(/([一二三四五六七八九])百零([一二三四五六七八九])/g, 
-    (_, p1, p2) => String(d(p1)*100 + d(p2)));
-
-  // 4. X百X (口语：一百五 -> 150)
-  // 必须排除后面跟“十”的情况（已被规则1、2捕获），防止冲突
-  t = t.replace(/([一二三四五六七八九])百([一二三四五六七八九])(?![十])/g, 
-    (_, p1, p2) => String(d(p1)*100 + d(p2)*10));
-
-  // 5. X百 (如：一百 -> 100)
-  t = t.replace(/([一二三四五六七八九])百/g, 
-    (_, p1) => String(d(p1)*100));
-
-  // --- 处理“十” (Tens) ---
-  // 1. X十X (如：二十三 -> 23)
-  t = t.replace(/([一二三四五六七八九])十([一二三四五六七八九])/g, 
-    (_, p1, p2) => String(d(p1) * 10 + d(p2)));
-  
-  // 2. X十 (如：二十 -> 20)
-  t = t.replace(/([一二三四五六七八九])十/g, 
-    (_, p1) => String(d(p1) * 10));
-
-  // 3. 十X (如：十三 -> 13)
-  t = t.replace(/十([一二三四五六七八九])/g, 
-    (_, p1) => String(10 + d(p1)));
-
-  // 4. 十 (如：十块 -> 10块)
+  t = t.replace(/([一二三四五六七八九])百([一二三四五六七八九])十([一二三四五六七八九])/g, (_, p1, p2, p3) => String(d(p1)*100 + d(p2)*10 + d(p3)));
+  t = t.replace(/([一二三四五六七八九])百([一二三四五六七八九])十/g, (_, p1, p2) => String(d(p1)*100 + d(p2)*10));
+  t = t.replace(/([一二三四五六七八九])百零([一二三四五六六七八九])/g, (_, p1, p2) => String(d(p1)*100 + d(p2)));
+  t = t.replace(/([一二三四五六七八九])百([一二三四五六七八九])(?![十])/g, (_, p1, p2) => String(d(p1)*100 + d(p2)*10));
+  t = t.replace(/([一二三四五六七八九])百/g, (_, p1) => String(d(p1)*100));
+  t = t.replace(/([一二三四五六七八九])十([一二三四五六七八九])/g, (_, p1, p2) => String(d(p1) * 10 + d(p2)));
+  t = t.replace(/([一二三四五六七八九])十/g, (_, p1) => String(d(p1) * 10));
+  t = t.replace(/十([一二三四五六七八九])/g, (_, p1) => String(10 + d(p1)));
   t = t.replace(/十/g, '10');
-
-  // --- 处理剩余单个数字 ---
   return t.replace(/[零一二三四五六七八九]/g, (m) => String(map[m]));
 };
 
@@ -100,15 +60,15 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
   const [isSavingDiary, setIsSavingDiary] = useState(false);
   const [isSavingRecord, setIsSavingRecord] = useState(false);
   
-  // Audio Recording States
   const [isListening, setIsListening] = useState(false);
   const [isDiaryListening, setIsDiaryListening] = useState(false);
+  const [supportSpeech, setSupportSpeech] = useState(true);
+  const [isSecure, setIsSecure] = useState(true);
   
   const recognitionRef = useRef<any>(null);
   const activeModeRef = useRef<'transaction' | 'diary'>('transaction');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 格式化数字：添加千位分隔符
   const formatWithCommas = (val: string) => {
     if (!val) return '';
     const cleanValue = val.replace(/[^\d.]/g, '');
@@ -125,38 +85,54 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
     setDiaryInput(existing?.content || '');
   }, [date, diaries]);
 
-  // 初始化语音识别
+  // 环境检测与初始化
   useEffect(() => {
+    // 检查安全上下文（Android 9+ 必须 HTTPS）
+    if (window.isSecureContext === false) {
+      setIsSecure(false);
+    }
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
+    if (!SpeechRecognition) {
+      setSupportSpeech(false);
+      return;
+    }
+
+    const initRecognition = () => {
       const recognition = new SpeechRecognition();
       recognition.lang = 'zh-CN';
       recognition.interimResults = false;
-      recognition.continuous = false; // 设为 false 在移动端兼容性更好
+      recognition.continuous = false;
 
       recognition.onstart = () => {
-        // 震动反馈
-        if (navigator.vibrate) navigator.vibrate(50);
+        if (navigator.vibrate) navigator.vibrate(40);
       };
 
       recognition.onend = () => {
         setIsListening(false);
         setIsDiaryListening(false);
-        // 震动反馈
-        if (navigator.vibrate) navigator.vibrate([30, 30]);
+        if (navigator.vibrate) navigator.vibrate([20, 20]);
       };
 
       recognition.onerror = (event: any) => {
-        console.error("Speech recognition error", event.error);
         setIsListening(false);
         setIsDiaryListening(false);
-        if (event.error === 'not-allowed') {
-          alert('无法访问麦克风。请检查系统设置中的权限，或确认APP是否有录音权限。');
-        } else if (event.error === 'no-speech') {
-          // 忽略此错误，只是没听到声音
-        } else {
-          // alert(`语音识别错误: ${event.error}`);
+        
+        const err = event.error;
+        // 处理 no-speech 错误，这是最常见的静默中断原因，通常不需要弹出警告
+        if (err === 'no-speech') {
+          console.debug("Recognition: No speech detected.");
+          return;
         }
+
+        if (err === 'not-allowed') {
+          alert('权限被拦截：\n1. 请在安卓系统中开启APP的“录音/麦克风”权限。\n2. 如果是打包后的APK，请确保已在代码中声明 RECORD_AUDIO。');
+        } else if (err === 'service-not-allowed') {
+          alert('系统限制：Android安全策略可能拦截了非HTTPS页面的语音请求。');
+        } else if (err === 'network') {
+          alert('识别失败：此功能需要联网调用系统语音引擎（如Google语音或华为语音）。');
+        }
+        console.error("Recognition Error:", err);
       };
 
       recognition.onresult = (event: any) => {
@@ -167,22 +143,16 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
           setDiaryInput(prev => prev + (prev ? ' ' : '') + transcript);
         }
       };
+      return recognition;
+    };
 
-      recognitionRef.current = recognition;
-    } else {
-      console.warn("Browser does not support Speech Recognition");
-    }
+    recognitionRef.current = initRecognition();
   }, []);
 
   const handleVoiceParse = (originalText: string) => {
     const text = normalizeVoiceText(originalText);
     let noteText = text;
-
-    // 0. 日期提取
-    const dateOffsets: Record<string, number> = {
-      '前天': -2, '昨天': -1, '今天': 0, '明天': 1, '后天': 2
-    };
-    
+    const dateOffsets: Record<string, number> = { '前天': -2, '昨天': -1, '今天': 0, '明天': 1, '后天': 2 };
     for (const [key, offset] of Object.entries(dateOffsets)) {
       if (noteText.includes(key)) {
         const d = new Date();
@@ -192,8 +162,6 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
         break;
       }
     }
-
-    // 1. 提取金额
     let extractedAmount = '';
     const currencyMatch = noteText.match(/(\d+(?:\.\d+)?)\s*(?:元|块|钱)/);
     if (currencyMatch) {
@@ -212,81 +180,54 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
         }
       }
     }
-
-    if (extractedAmount) {
-      setAmount(formatWithCommas(extractedAmount));
-    }
-
-    // 2. 优化备注
-    noteText = noteText.replace(/花了|花费|用去|买|去|支出|收入|坐|做/g, ''); 
-    noteText = noteText.replace(/元|块|钱/g, ''); 
-    noteText = noteText.replace(/[，。！？,.!?]/g, ' ');
+    if (extractedAmount) setAmount(formatWithCommas(extractedAmount));
+    noteText = noteText.replace(/花了|花费|用去|买|去|支出|收入|坐|做/g, '').replace(/元|块|钱/g, '').replace(/[，。！？,.!?]/g, ' ');
     setNote(noteText.trim());
-
-    // 3. 匹配分类
     let detectedCategory = '';
     let detectedType: TransactionType = 'expense';
     let bestMatchLength = 0;
-
     if (text.includes('收') || text.includes('赚') || text.includes('工资') || text.includes('奖金') || text.includes('红包')) {
       detectedType = 'income';
       detectedCategory = '收入';
     } else {
       for (const [key, label] of Object.entries(KEYWORD_MAP)) {
-        if (text.includes(key)) {
-          if (key.length > bestMatchLength) {
-            bestMatchLength = key.length;
-            detectedCategory = label;
-          }
+        if (text.includes(key) && key.length > bestMatchLength) {
+          bestMatchLength = key.length;
+          detectedCategory = label;
         }
       }
     }
-
-    if (detectedCategory) {
-      setType(detectedType);
-      setCategory(detectedCategory);
-    }
+    if (detectedCategory) { setType(detectedType); setCategory(detectedCategory); }
   };
 
-  const startListening = (mode: 'transaction' | 'diary') => {
-    if (!recognitionRef.current) {
-      alert('您的设备不支持原生语音识别，或APP内核不支持 Web Speech API。');
-      return;
+  const startListening = async (mode: 'transaction' | 'diary') => {
+    if (!recognitionRef.current) return;
+
+    // 预触发：强制调用一次 getUserMedia 以在 APK 环境触发系统权限弹窗
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(t => t.stop()); // 仅用于触发弹窗，立即关闭
+    } catch (e) {
+      console.warn("Pre-auth failed, but continuing with Recognition API");
     }
     
-    // 如果正在识别，先停止
-    if (isListening || isDiaryListening) {
-      recognitionRef.current.stop();
-      return;
-    }
+    try { recognitionRef.current.stop(); } catch(e) {}
 
     activeModeRef.current = mode;
-    try {
-      recognitionRef.current.start();
-      if (mode === 'transaction') setIsListening(true);
-      else setIsDiaryListening(true);
-    } catch (e) {
-      console.error("Start error", e);
-      // 有时上次的session还没完全结束，重试一次
+    setTimeout(() => {
       try {
-          recognitionRef.current.stop();
-          setTimeout(() => {
-              recognitionRef.current.start();
-              if (mode === 'transaction') setIsListening(true);
-              else setIsDiaryListening(true);
-          }, 200);
-      } catch(retryErr) {
-          setIsListening(false);
-          setIsDiaryListening(false);
+        recognitionRef.current.start();
+        if (mode === 'transaction') setIsListening(true);
+        else setIsDiaryListening(true);
+      } catch (e) {
+        setIsListening(false);
+        setIsDiaryListening(false);
       }
-    }
+    }, 100);
   };
 
   const stopListening = () => {
-    if (recognitionRef.current && (isListening || isDiaryListening)) {
-      recognitionRef.current.stop();
-      // 状态会在 onend 回调中重置
-    }
+    if (recognitionRef.current) recognitionRef.current.stop();
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -294,21 +235,15 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
     const cleanAmount = amount.replace(/,/g, '');
     const val = parseFloat(cleanAmount);
     if (!val || isNaN(val)) return;
-
     setIsSavingRecord(true);
     setTimeout(() => setIsSavingRecord(false), 400);
-
     const group = CATEGORY_GROUPS.find(g => g.items.some(i => i.label === category))?.name || '其他大类';
-
     onAdd({
       id: Math.random().toString(36).substr(2, 9),
-      type,
-      category,
+      type, category,
       categoryGroup: type === 'income' ? '收入' : group,
       amount: Math.abs(val),
-      date,
-      note,
-      createdAt: Date.now()
+      date, note, createdAt: Date.now()
     });
     setAmount('');
     setNote('');
@@ -351,11 +286,7 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
         if (currentSection === "ts") {
           const [d, t, c, a, n] = line.split('|');
           if (d && t && c && a) {
-            importedTs.push({
-              id: Math.random().toString(36).substr(2, 9),
-              date: d, type: t as TransactionType, category: c,
-              categoryGroup: '', amount: parseFloat(a), note: n || '', createdAt: Date.now()
-            });
+            importedTs.push({ id: Math.random().toString(36).substr(2, 9), date: d, type: t as TransactionType, category: c, categoryGroup: '', amount: parseFloat(a), note: n || '', createdAt: Date.now() });
           }
         } else if (currentSection === "ds") {
           const [d, c] = line.split('|');
@@ -379,12 +310,28 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
     return days;
   }, [viewDate]);
 
-  const allExpenseCategories = useMemo(() => {
-    return CATEGORY_GROUPS.flatMap(g => g.items);
-  }, []);
+  const allExpenseCategories = useMemo(() => CATEGORY_GROUPS.flatMap(g => g.items), []);
 
   return (
     <div className="space-y-3 pb-6 animate-in fade-in duration-500 relative">
+      {!isSecure && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 flex items-start gap-2 mb-2">
+          <ShieldAlert size={16} className="text-amber-500 mt-0.5 shrink-0" />
+          <p className="text-[10px] font-bold text-amber-700 leading-normal">
+            安全警告：当前处于非安全环境（HTTP）。Android系统可能因此禁用语音识别。请打包APK时确保WebView访问地址以 https:// 开头。
+          </p>
+        </div>
+      )}
+
+      {!supportSpeech && (
+        <div className="bg-red-50 border border-red-100 rounded-2xl p-3 flex items-start gap-2 mb-2">
+          <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
+          <p className="text-[10px] font-bold text-red-600 leading-normal">
+            设备不支持原生语音识别。请安装“Google 语音服务”或在 APK 设置中启用相应系统权限。
+          </p>
+        </div>
+      )}
+
       {showCalendar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-sm rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 duration-200">
@@ -392,10 +339,10 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
               <h3 className="text-lg font-extrabold text-black">选择记录日期</h3>
               <button onClick={() => setShowCalendar(false)} className="p-2 text-black hover:bg-slate-100 rounded-full transition-colors"><X size={24} /></button>
             </div>
-            <div className="flex justify-between items-center mb-4">
-              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 bg-slate-50 rounded-xl text-black"><ChevronLeft size={20} /></button>
-              <span className="font-extrabold text-base text-black">{viewDate.getFullYear()}年 {viewDate.getMonth() + 1}月</span>
-              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 bg-slate-50 rounded-xl text-black"><ChevronRight size={20} /></button>
+            <div className="flex justify-between items-center mb-4 text-black">
+              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="p-2 bg-slate-50 rounded-xl"><ChevronLeft size={20} /></button>
+              <span className="font-extrabold text-base">{viewDate.getFullYear()}年 {viewDate.getMonth() + 1}月</span>
+              <button onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="p-2 bg-slate-50 rounded-xl"><ChevronRight size={20} /></button>
             </div>
             <div className="grid grid-cols-7 gap-1 text-center mb-2">
               {['日', '一', '二', '三', '四', '五', '六'].map(d => (<div key={d} className="text-xs font-black text-slate-300 uppercase tracking-widest">{d}</div>))}
@@ -423,47 +370,27 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
             <BookOpen size={20} className="text-slate-400" /> 
             {date === getLocalDateString(new Date()) ? '今日日记' : '日记'}
           </h3>
-          <button 
-            onClick={() => setShowCalendar(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all active:scale-95"
-          >
+          <button onClick={() => setShowCalendar(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all active:scale-95">
             <span className="text-[10px] font-bold text-slate-500">{date}</span>
             <CalendarIcon size={12} className="text-slate-400" />
           </button>
         </div>
-        <textarea 
-          value={diaryInput} 
-          onChange={e => setDiaryInput(e.target.value)} 
-          placeholder="今天发生了什么难忘的事吗？" 
-          className="w-full h-20 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-sm font-bold outline-none resize-none focus:ring-2 focus:ring-black transition-all shadow-inner text-black placeholder:text-slate-200 mb-3" 
-        />
+        <textarea value={diaryInput} onChange={e => setDiaryInput(e.target.value)} placeholder="今天发生了什么难忘的事吗？" className="w-full h-20 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-sm font-bold outline-none resize-none focus:ring-2 focus:ring-black transition-all shadow-inner text-black placeholder:text-slate-200 mb-3" />
         <div className="flex justify-end gap-2">
-          {/* Voice Diary (Left) */}
           <button 
-            onMouseDown={(e) => { e.preventDefault(); startListening('diary'); }}
-            onMouseUp={(e) => { e.preventDefault(); stopListening(); }}
-            onMouseLeave={(e) => { e.preventDefault(); stopListening(); }}
-            onTouchStart={(e) => { e.preventDefault(); startListening('diary'); }}
-            onTouchEnd={(e) => { e.preventDefault(); stopListening(); }}
+            onPointerDown={(e) => { e.preventDefault(); startListening('diary'); }}
+            onPointerUp={(e) => { e.preventDefault(); stopListening(); }}
+            onPointerLeave={(e) => { e.preventDefault(); stopListening(); }}
             className={`flex items-center gap-1 px-4 py-2.5 rounded-xl font-black text-xs transition-all duration-300 select-none touch-none ${
               isDiaryListening 
-                ? 'bg-red-500 text-white border border-red-500 shadow-inner' 
-                : 'bg-slate-100 text-black border border-slate-200 shadow-sm hover:bg-slate-50 active:scale-95'
+                ? 'bg-red-500 text-white border border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse' 
+                : 'bg-slate-100 text-black border border-slate-200 shadow-sm active:scale-95'
             }`}
           >
-            {isDiaryListening ? <MicOff size={14} className="animate-pulse" /> : <Mic size={14} />} 
+            {isDiaryListening ? <MicOff size={14} /> : <Mic size={14} />} 
             {isDiaryListening ? '松开停止' : '语音日记'}
           </button>
-
-          {/* Save Diary (Right) */}
-          <button 
-            onClick={handleSaveDiary}
-            className={`flex items-center gap-1 bg-black text-white border border-transparent px-5 py-2.5 rounded-xl font-black text-xs transition-all duration-300 ${
-              isSavingDiary 
-                ? 'scale-110 shadow-md bg-black/80' 
-                : 'active:scale-95 shadow-lg hover:shadow-xl'
-            }`}
-          >
+          <button onClick={handleSaveDiary} className={`flex items-center gap-1 bg-black text-white px-5 py-2.5 rounded-xl font-black text-xs transition-all duration-300 ${isSavingDiary ? 'scale-110 shadow-md bg-black/80' : 'active:scale-95 shadow-lg'}`}>
             <Save size={14} /> 保存日记
           </button>
         </div>
@@ -474,13 +401,11 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-xl font-black text-black flex items-center gap-3 tracking-tighter">今日记账</h2>
           <div className="flex gap-2">
-            <button onClick={() => fileInputRef.current?.click()} className="p-2.5 bg-slate-50 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors shadow-sm" title="导入">
+            <button onClick={() => fileInputRef.current?.click()} className="p-2.5 bg-slate-50 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors shadow-sm">
               <Download size={18} />
               <input type="file" ref={fileInputRef} onChange={handleImport} className="hidden" accept=".txt" />
             </button>
-            <button onClick={handleExport} className="p-2.5 bg-slate-50 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors shadow-sm" title="导出">
-              <Upload size={18} />
-            </button>
+            <button onClick={handleExport} className="p-2.5 bg-slate-50 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors shadow-sm"><Upload size={18} /></button>
           </div>
         </div>
 
@@ -490,10 +415,10 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
             <button type="button" onClick={() => { setType('income'); setCategory('收入'); }} className={`flex-1 py-2.5 rounded-xl font-extrabold text-xs transition-all ${type === 'income' ? 'bg-white shadow-md text-black scale-[1.02]' : 'text-slate-400'}`}>收入</button>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex gap-3 text-black">
             <div className="flex-1 space-y-1">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">记录时间</label>
-              <button type="button" onClick={() => setShowCalendar(true)} className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 rounded-xl border border-slate-100 font-bold text-sm shadow-sm active:scale-95 transition-all text-black">
+              <button type="button" onClick={() => setShowCalendar(true)} className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 rounded-xl border border-slate-100 font-bold text-sm shadow-sm active:scale-95 transition-all">
                 <span className="flex items-center gap-2"><CalendarIcon size={16} className="text-slate-400" /> {date === getLocalDateString(new Date()) ? '今天' : date}</span>
                 <ChevronDown size={14} className="text-slate-300" />
               </button>
@@ -501,15 +426,8 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
             <div className="flex-1 space-y-1">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">金额</label>
               <div className="relative group">
-                <input 
-                  type="text" 
-                  inputMode="decimal"
-                  value={amount} 
-                  onChange={e => setAmount(formatWithCommas(e.target.value))} 
-                  placeholder="0.00" 
-                  className="w-full pl-4 pr-8 py-3 bg-slate-50 rounded-xl border border-slate-100 font-black text-lg outline-none focus:ring-2 focus:ring-black transition-all shadow-sm text-black placeholder:text-slate-200" 
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 font-black text-slate-300 text-sm transition-colors group-focus-within:text-black">¥</span>
+                <input type="text" inputMode="decimal" value={amount} onChange={e => setAmount(formatWithCommas(e.target.value))} placeholder="0.00" className="w-full pl-4 pr-8 py-3 bg-slate-50 rounded-xl border border-slate-100 font-black text-lg outline-none focus:ring-2 focus:ring-black transition-all shadow-sm text-black placeholder:text-slate-200" />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 font-black text-slate-300 text-sm">¥</span>
               </div>
             </div>
           </div>
@@ -521,22 +439,19 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
 
           <div className="select-none py-1">
             <div className="flex gap-3">
-              {/* Hold to Speak (Left) */}
               <button 
-                onMouseDown={(e) => { e.preventDefault(); startListening('transaction'); }}
-                onMouseUp={(e) => { e.preventDefault(); stopListening(); }}
-                onMouseLeave={(e) => { e.preventDefault(); stopListening(); }}
-                onTouchStart={(e) => { e.preventDefault(); startListening('transaction'); }}
-                onTouchEnd={(e) => { e.preventDefault(); stopListening(); }}
+                onPointerDown={(e) => { e.preventDefault(); startListening('transaction'); }}
+                onPointerUp={(e) => { e.preventDefault(); stopListening(); }}
+                onPointerLeave={(e) => { e.preventDefault(); stopListening(); }}
                 className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl border transition-all duration-150 touch-none select-none ${
                   isListening 
-                    ? 'bg-red-500 border-red-500 text-white shadow-inner scale-95' 
-                    : 'bg-slate-100 border-slate-200 text-black active:scale-95 hover:bg-slate-50'
+                    ? 'bg-red-500 border-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.5)] scale-95 animate-pulse' 
+                    : 'bg-slate-100 border-slate-200 text-black active:scale-95'
                 }`}
               >
                 {isListening ? (
                   <>
-                    <MicOff size={18} className="animate-pulse" />
+                    <MicOff size={18} />
                     <span className="font-bold text-sm">松开结束</span>
                   </>
                 ) : (
@@ -546,18 +461,10 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
                   </>
                 )}
               </button>
-
-              {/* Save Record (Right) */}
-              <button 
-                type="submit" 
-                className={`flex-1 bg-black text-white border border-transparent py-3.5 rounded-2xl font-black text-lg shadow-xl transition-all duration-300 flex items-center justify-center gap-2 hover:shadow-black/20 ${
-                  isSavingRecord ? 'scale-105' : 'active:scale-95'
-                }`}
-              >
+              <button type="submit" className={`flex-1 bg-black text-white py-3.5 rounded-2xl font-black text-lg shadow-xl transition-all duration-300 flex items-center justify-center gap-2 ${isSavingRecord ? 'scale-105' : 'active:scale-95'}`}>
                 <Check size={20} strokeWidth={3} /> 保存记录
               </button>
             </div>
-            <p className="text-center text-[10px] text-slate-300 mt-2 font-bold uppercase tracking-widest">试着说：“昨天地铁3元”或“买菜花了20”</p>
           </div>
 
           <div className="space-y-2 pt-2">
@@ -566,13 +473,8 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
               {type === 'expense' ? (
                 <div className="grid grid-cols-5 gap-y-3 gap-x-1 pt-1">
                   {allExpenseCategories.map(item => (
-                    <button 
-                      key={item.label} 
-                      type="button" 
-                      onClick={() => setCategory(item.label)} 
-                      className={`flex flex-col items-center gap-1 py-1 rounded-xl transition-all ${category === item.label ? 'bg-white shadow-lg scale-110 z-10' : 'opacity-60'}`}
-                    >
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md transition-transform" style={{ backgroundColor: item.color }}>
+                    <button key={item.label} type="button" onClick={() => setCategory(item.label)} className={`flex flex-col items-center gap-1 py-1 rounded-xl transition-all ${category === item.label ? 'bg-white shadow-lg scale-110 z-10' : 'opacity-60'}`}>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md" style={{ backgroundColor: item.color }}>
                         {React.cloneElement(item.icon as React.ReactElement<any>, { size: 18, color: 'white', strokeWidth: 2.5 })}
                       </div>
                       <span className="text-[10px] font-black text-black leading-tight h-4 flex items-center text-center scale-90">{item.displayLabel}</span>
@@ -581,11 +483,7 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
                 </div>
               ) : (
                 <div className="grid grid-cols-5 gap-1 pt-1">
-                  <button 
-                    type="button" 
-                    onClick={() => setCategory('收入')} 
-                    className={`flex flex-col items-center gap-1 py-1 rounded-xl transition-all ${category === '收入' ? 'bg-white shadow-lg scale-110 z-10' : 'opacity-60'}`}
-                  >
+                  <button type="button" onClick={() => setCategory('收入')} className={`flex flex-col items-center gap-1 py-1 rounded-xl transition-all ${category === '收入' ? 'bg-white shadow-lg scale-110 z-10' : 'opacity-60'}`}>
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md" style={{ backgroundColor: INCOME_CATEGORY.color }}>
                       {React.cloneElement(INCOME_CATEGORY.icon as React.ReactElement<any>, { size: 18, color: 'white', strokeWidth: 2.5 })}
                     </div>
@@ -597,7 +495,6 @@ const Home: React.FC<HomeProps> = ({ transactions, diaries, onAdd, onImportAll, 
           </div>
         </form>
       </div>
-
     </div>
   );
 };
